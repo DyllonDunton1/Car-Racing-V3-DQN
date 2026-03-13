@@ -1,71 +1,62 @@
-import gymnasium as gym
-import pygame
-import numpy as np
-import matplotlib.pyplot as plt
-import pandas as pd
-import os
-import warnings
+import time
 import torch
-from torchvision import io, transforms, models
-import torch.nn as nn
-from PIL import Image
-from torch.utils.data import Dataset, DataLoader
-import torch.optim as optim
-import torch.nn.functional as F
-import gc
-from torch.cuda.amp import autocast, GradScaler
-from input_testing import prepare_state_into_tensor
+from make_env import get_environment
+from model_loader import get_policy
+import numpy as np
+
+DO_ROLLOUT = True
+
+env_type = "CNN"
+stack_size = 4
+render_mode = "rgb_array"
+device = 'cuda'
+env = get_environment(env_type, stack_size, render_mode, do_flips=False)
+policy = get_policy(device, env_type, weights_path="carracing.pth")
+
+state, _ = env.reset(seed=3)
+state = torch.tensor(state).to(torch.float32).to(device).unsqueeze(0) / 255.0
+
+vid_len = 800
+time_steps = vid_len
+time_delay = 0
 
 
-def is_off_road(state_image):
-    center_x = 40
-    center_y = 60
-    region = state_image[0, 0, center_y-2:center_y+3, center_x-2:center_x+3]
-    avg_value = torch.mean(region)
-    print(avg_value)
-    return (avg_value > 110).item()
-    
+
+if DO_ROLLOUT:
+    actions_to_start =  np.loadtxt('rollout.txt')
+    actions_to_start = [int(action) for action in actions_to_start]
+    time_steps = len(actions_to_start)
 
 
-env = gym.make('CarRacing-v3', render_mode='human',lap_complete_percent=0.95, domain_randomize=False, continuous=True)
-state = env.reset()
-#print(state)
-tensor_state = torch.tensor(state[0], dtype=torch.float32)
-#print(tensor_state)
-#print(env.action_space)
+vid_frames = []
+for i in range(time_steps):
 
-def car_speed():
-    return  np.linalg.norm(env.unwrapped.car.hull.linearVelocity)
-
-def car_heading():
-    return ((env.unwrapped.car.hull.angle + np.pi) / (2*np.pi) ) % 1
-
-def car_steering():
-    return env.unwrapped.car.wheels[0].joint.angle + 0.5
-
-def car_angle_vel():
-    return env.unwrapped.car.hull.angularVelocity
-
-iter = -1
-while True:
-    # Render the game window
-    env.render()
-    iter += 1
-
-    if iter < 100:
-        action = [-1.0, 0.1, 0]
+    if DO_ROLLOUT:
+        action = actions_to_start[i]
     else:
-        action = [0, 0.1, 0]
-    state, reward, done, truncated, info = env.step(np.array(action))
-    #state_tensor = prepare_state_into_tensor(state).unsqueeze(0)
-    #print(tensor_state)
-    if done:
-        state, info = env.reset()
-        break
-    
-    print(car_steering())
+        action = torch.argmax(policy(state))
 
-    
-# Close the environment
-env.close()
+    #if np.random.random() < 0.05:
+    #    action = np.random.randint(env.action_space.n)
+    state, reward, is_terminal, _, raw = env.step(action)
+    frame = env.render()
+    print(frame.shape)
+    vid_frames.append(frame)
+    state = torch.tensor(state).to(torch.float32).to(device).unsqueeze(0) / 255.0
+    #print(state.shape)
+    time.sleep(time_delay)
+    angle_vel = env.unwrapped.car.hull.angularVelocity
+    #print(np.linalg.norm(env.unwrapped.car.hull.linearVelocity))
+    #print(reward)
 
+print(len(vid_frames))
+print("TIME STEPS", vid_len)
+while len(vid_frames) < vid_len:
+    vid_frames.append(vid_frames[-1].copy())
+print("NEW", len(vid_frames))
+import imageio.v2 as imageio
+
+vid_name = "rollout.gif" if DO_ROLLOUT else "base_policy.gif"
+vid_path = f"vids/{vid_name}"
+print(len(vid_frames))
+imageio.mimsave(vid_path, vid_frames, fps=45)
