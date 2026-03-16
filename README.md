@@ -1,6 +1,9 @@
 # Deep Reinforcement Learning for Autonomous Driving  
 ### Double-DQN with Rollout Planning in CarRacing-v3
 
+## Demo
+![Reward Shaping Visualization](gifs/comparison.gif)
+
 ## Project Overview
 
 This project explores dynamic programming through deep reinforcement learning using the **CarRacing-v3 environment from OpenAI Gymnasium**. The environment presents a sparse reward structure and continuous control over steering, throttle, and braking.
